@@ -165,7 +165,7 @@ pub const Resolver = struct {
                 .rdata = try self.allocator.dupe(u8, rr.rdata),
                 .parsed = null, // Will be parsed on demand
             };
-            try result.answers.append(record);
+            try result.answers.append(self.allocator, record);
         }
 
         // Parse authorities
@@ -178,7 +178,7 @@ pub const Resolver = struct {
                 .rdata = try self.allocator.dupe(u8, rr.rdata),
                 .parsed = null,
             };
-            try result.authorities.append(record);
+            try result.authorities.append(self.allocator, record);
         }
 
         // Parse additionals
@@ -191,7 +191,7 @@ pub const Resolver = struct {
                 .rdata = try self.allocator.dupe(u8, rr.rdata),
                 .parsed = null,
             };
-            try result.additionals.append(record);
+            try result.additionals.append(self.allocator, record);
         }
 
         return result;
@@ -231,7 +231,7 @@ pub const Resolver = struct {
         var it = std.mem.split(u8, name_copy, ".");
         while (it.next()) |label| {
             if (label.len > 0) {
-                try labels.append(try self.allocator.dupe(u8, label));
+                try labels.append(self.allocator, try self.allocator.dupe(u8, label));
             }
         }
 
@@ -269,7 +269,7 @@ pub const Resolver = struct {
                         if (auth.rtype == records.RecordType.NS) {
                             const ns_record = records.NSRecord.fromRdata(auth.rdata, self.allocator) catch continue;
                             defer self.allocator.free(ns_record.nsdname);
-                            try new_servers.append(try self.allocator.dupe(u8, ns_record.nsdname));
+                            try new_servers.append(self.allocator, try self.allocator.dupe(u8, ns_record.nsdname));
                         }
                     }
 
@@ -291,7 +291,7 @@ pub const Resolver = struct {
                                 if (answer.rtype == records.RecordType.A) {
                                     const a_record = records.ARecord.fromRdata(answer.rdata) catch continue;
                                     const ip_str = try a_record.toString(self.allocator);
-                                    try ip_servers.append(ip_str);
+                                    try ip_servers.append(self.allocator, ip_str);
                                 }
                             }
                         }
@@ -302,7 +302,7 @@ pub const Resolver = struct {
                                 self.allocator.free(srv);
                             }
                             self.allocator.free(current_servers);
-                            current_servers = try ip_servers.toOwnedSlice();
+                            current_servers = try ip_servers.toOwnedSlice(self.allocator);
                             break;
                         }
                     }
@@ -356,27 +356,27 @@ pub const QueryResult = struct {
         self.additionals.deinit(allocator);
     }
 
-    pub fn getAnswers(self: *QueryResult, rtype: records.RecordType) std.ArrayList(*ResourceRecord) {
-        var result = std.ArrayList(*ResourceRecord){};
+    pub fn getAnswers(self: *QueryResult, allocator: std.mem.Allocator, rtype: records.RecordType) std.ArrayList(*ResourceRecord) {
+        var result = std.ArrayList(*ResourceRecord).init(allocator);
         
         for (self.answers.items) |*record| {
             if (record.rtype == rtype) {
-                result.append(record) catch continue;
+                result.append(allocator, record) catch continue;
             }
         }
         
         return result;
     }
 
-    pub fn hasAnswer(self: *QueryResult) bool {
+    pub fn hasAnswer(self: *const QueryResult) bool {
         return self.answers.items.len > 0;
     }
 
-    pub fn isAuthoritative(self: *QueryResult) bool {
+    pub fn isAuthoritative(self: *const QueryResult) bool {
         return self.authoritative;
     }
 
-    pub fn wasSuccessful(self: *QueryResult) bool {
+    pub fn wasSuccessful(self: *const QueryResult) bool {
         return self.rcode == 0;
     }
 };
@@ -438,11 +438,11 @@ pub fn resolveA(allocator: std.mem.Allocator, name: []const u8) ![]std.net.Addre
         if (record.rtype == records.RecordType.A) {
             const a_record = try records.ARecord.fromRdata(record.rdata);
             const addr = std.net.Address.initIp4(a_record.address, 0);
-            try addresses.append(addr);
+            try addresses.append(allocator, addr);
         }
     }
 
-    return addresses.toOwnedSlice();
+    return try addresses.toOwnedSlice(allocator);
 }
 
 pub fn resolveAAAA(allocator: std.mem.Allocator, name: []const u8) ![]std.net.Address {
@@ -462,11 +462,11 @@ pub fn resolveAAAA(allocator: std.mem.Allocator, name: []const u8) ![]std.net.Ad
         if (record.rtype == records.RecordType.AAAA) {
             const aaaa_record = try records.AAAARecord.fromRdata(record.rdata);
             const addr = std.net.Address.initIp6(aaaa_record.address, 0, 0, 0);
-            try addresses.append(addr);
+            try addresses.append(allocator, addr);
         }
     }
 
-    return addresses.toOwnedSlice();
+    return try addresses.toOwnedSlice(allocator);
 }
 
 test "resolver creation" {

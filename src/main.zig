@@ -117,11 +117,11 @@ fn handleQuery(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     }
 
     // Print results
-    std.debug.print("\n");
+    std.debug.print("\n", .{});
     std.debug.print("Query: {s} {s} {s}\n", .{ name, record_type.toString(), zdns.RecordClass.IN.toString() });
     std.debug.print("Status: {s}\n", .{if (result.wasSuccessful()) "SUCCESS" else "FAILED"});
     std.debug.print("Authoritative: {}\n", .{result.isAuthoritative()});
-    std.debug.print("\n");
+    std.debug.print("\n", .{});
 
     if (result.answers.items.len > 0) {
         std.debug.print("Answers ({}):\n", .{result.answers.items.len});
@@ -136,7 +136,7 @@ fn handleQuery(allocator: std.mem.Allocator, args: [][:0]u8) !void {
                 rdata_str,
             });
         }
-        std.debug.print("\n");
+        std.debug.print("\n", .{});
     }
 
     if (result.authorities.items.len > 0) {
@@ -152,7 +152,7 @@ fn handleQuery(allocator: std.mem.Allocator, args: [][:0]u8) !void {
                 rdata_str,
             });
         }
-        std.debug.print("\n");
+        std.debug.print("\n", .{});
     }
 
     if (result.additionals.items.len > 0) {
@@ -225,7 +225,7 @@ fn handleServer(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     if (config.enable_https) std.debug.print("HTTPS port: {}\n", .{config.https_port});
     if (config.enable_quic) std.debug.print("QUIC port: {}\n", .{config.quic_port});
     std.debug.print("Recursion: {}\n", .{config.enable_recursion});
-    std.debug.print("\n");
+    std.debug.print("\n", .{});
 
     var server = try zdns.Server.init(allocator, config);
     defer server.deinit();
@@ -234,7 +234,7 @@ fn handleServer(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     const signal_handler = struct {
         var srv: ?*zdns.Server = null;
         
-        fn handler(sig: i32) callconv(.C) void {
+        fn handler(sig: i32) callconv(.c) void {
             _ = sig;
             if (srv) |s| {
                 s.stop();
@@ -243,11 +243,12 @@ fn handleServer(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     };
     
     signal_handler.srv = &server;
-    _ = std.os.sigaction(std.os.SIG.INT, &std.os.Sigaction{
-        .handler = .{ .handler = signal_handler.handler },
-        .mask = std.os.empty_sigset,
-        .flags = 0,
-    }, null);
+    // TODO: Fix signal handling for Zig 0.16
+    // _ = std.posix.sigaction(std.posix.SIG.INT, &std.posix.Sigaction{
+    //     .handler = .{ .handler = signal_handler.handler },
+    //     .mask = std.posix.empty_sigset,
+    //     .flags = 0,
+    // }, null);
 
     try server.start();
 }
@@ -261,7 +262,7 @@ fn handleZone(allocator: std.mem.Allocator, args: [][:0]u8) !void {
     const subcommand = args[0];
 
     if (std.mem.eql(u8, subcommand, "list")) {
-        std.debug.print("No zones loaded.\n"); // TODO: Implement zone listing
+        std.debug.print("No zones loaded.\n", .{}); // TODO: Implement zone listing
     } else if (std.mem.eql(u8, subcommand, "load")) {
         if (args.len < 3) {
             std.debug.print("Usage: zdns zone load <zone_name> <zone_file>\n", .{});
@@ -372,7 +373,7 @@ fn demo() !void {
     std.debug.print("   Name: {s}\n", .{stats.name});
     std.debug.print("   Total Records: {}\n", .{stats.total_records});
     std.debug.print("   Has SOA: {}\n", .{stats.has_soa});
-    std.debug.print("\n");
+    std.debug.print("\n", .{});
 
     // 4. Create cache
     std.debug.print("4. Creating cache...\n");

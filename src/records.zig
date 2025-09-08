@@ -234,7 +234,7 @@ pub const MXRecord = struct {
 
     pub fn fromRdata(rdata: []const u8, allocator: std.mem.Allocator) !MXRecord {
         if (rdata.len < 2) return error.InvalidRdata;
-        const preference = std.mem.readInt(u16, rdata[0..2], .big);
+        const preference = std.mem.readInt(u16, rdata[0..2][0..2], .big);
         const name = try decodeDnsName(rdata, 2, allocator);
         return MXRecord{
             .preference = preference,
@@ -268,13 +268,13 @@ pub const TXTRecord = struct {
             offset += 1;
             if (offset + len > rdata.len) return error.InvalidRdata;
             
-            try result.appendSlice(rdata[offset..offset + len]);
+            try result.appendSlice(allocator, rdata[offset..offset + len]);
             offset += len;
             
-            if (offset < rdata.len) try result.append(' ');
+            if (offset < rdata.len) try result.append(allocator, ' ');
         }
         
-        return TXTRecord{ .text = try result.toOwnedSlice() };
+        return TXTRecord{ .text = try result.toOwnedSlice(allocator) };
     }
 
     pub fn toRdata(self: TXTRecord, allocator: std.mem.Allocator) ![]u8 {
@@ -286,10 +286,10 @@ pub const TXTRecord = struct {
         // For now, treat the entire text as a single string
         if (self.text.len > 255) return error.TextTooLong;
         
-        try result.append(@intCast(self.text.len));
+        try result.append(allocator, @intCast(self.text.len));
         try result.appendSlice(self.text);
         
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 };
 
@@ -329,11 +329,11 @@ pub const SOARecord = struct {
         return SOARecord{
             .mname = mname_result.name,
             .rname = rname_result.name,
-            .serial = std.mem.readInt(u32, rdata[offset..offset+4], .big),
-            .refresh = std.mem.readInt(u32, rdata[offset+4..offset+8], .big),
-            .retry = std.mem.readInt(u32, rdata[offset+8..offset+12], .big),
-            .expire = std.mem.readInt(u32, rdata[offset+12..offset+16], .big),
-            .minimum = std.mem.readInt(u32, rdata[offset+16..offset+20], .big),
+            .serial = std.mem.readInt(u32, rdata[offset..offset+4][0..4], .big),
+            .refresh = std.mem.readInt(u32, rdata[offset+4..offset+8][0..4], .big),
+            .retry = std.mem.readInt(u32, rdata[offset+8..offset+12][0..4], .big),
+            .expire = std.mem.readInt(u32, rdata[offset+12..offset+16][0..4], .big),
+            .minimum = std.mem.readInt(u32, rdata[offset+16..offset+20][0..4], .big),
         };
     }
 
@@ -352,11 +352,11 @@ pub const SOARecord = struct {
         std.mem.copyForwards(u8, result[offset..], rname_encoded);
         offset += rname_encoded.len;
         
-        std.mem.writeInt(u32, result[offset..offset+4], self.serial, .big);
-        std.mem.writeInt(u32, result[offset+4..offset+8], self.refresh, .big);
-        std.mem.writeInt(u32, result[offset+8..offset+12], self.retry, .big);
-        std.mem.writeInt(u32, result[offset+12..offset+16], self.expire, .big);
-        std.mem.writeInt(u32, result[offset+16..offset+20], self.minimum, .big);
+        std.mem.writeInt(u32, result[offset..offset+4][0..4], self.serial, .big);
+        std.mem.writeInt(u32, result[offset+4..offset+8][0..4], self.refresh, .big);
+        std.mem.writeInt(u32, result[offset+8..offset+12][0..4], self.retry, .big);
+        std.mem.writeInt(u32, result[offset+12..offset+16][0..4], self.expire, .big);
+        std.mem.writeInt(u32, result[offset+16..offset+20][0..4], self.minimum, .big);
         
         return result;
     }
@@ -371,9 +371,9 @@ pub const SRVRecord = struct {
     pub fn fromRdata(rdata: []const u8, allocator: std.mem.Allocator) !SRVRecord {
         if (rdata.len < 6) return error.InvalidRdata;
         
-        const priority = std.mem.readInt(u16, rdata[0..2], .big);
-        const weight = std.mem.readInt(u16, rdata[2..4], .big);
-        const port = std.mem.readInt(u16, rdata[4..6], .big);
+        const priority = std.mem.readInt(u16, rdata[0..2][0..2], .big);
+        const weight = std.mem.readInt(u16, rdata[2..4][0..2], .big);
+        const port = std.mem.readInt(u16, rdata[4..6][0..2], .big);
         
         const name = try decodeDnsName(rdata, 6, allocator);
         
@@ -408,7 +408,7 @@ pub const DSRecord = struct {
     pub fn fromRdata(rdata: []const u8, allocator: std.mem.Allocator) !DSRecord {
         if (rdata.len < 4) return error.InvalidRdata;
         return DSRecord{
-            .key_tag = std.mem.readInt(u16, rdata[0..2], .big),
+            .key_tag = std.mem.readInt(u16, rdata[0..2][0..2], .big),
             .algorithm = rdata[2],
             .digest_type = rdata[3],
             .digest = try allocator.dupe(u8, rdata[4..]),
@@ -442,13 +442,13 @@ pub const RRSIGRecord = struct {
         const name_result = try decodeDnsName(rdata, 18, allocator);
         
         return RRSIGRecord{
-            .type_covered = std.mem.readInt(u16, rdata[0..2], .big),
+            .type_covered = std.mem.readInt(u16, rdata[0..2][0..2], .big),
             .algorithm = rdata[2],
             .labels = rdata[3],
-            .original_ttl = std.mem.readInt(u32, rdata[4..8], .big),
-            .signature_expiration = std.mem.readInt(u32, rdata[8..12], .big),
-            .signature_inception = std.mem.readInt(u32, rdata[12..16], .big),
-            .key_tag = std.mem.readInt(u16, rdata[16..18], .big),
+            .original_ttl = std.mem.readInt(u32, rdata[4..8][0..4], .big),
+            .signature_expiration = std.mem.readInt(u32, rdata[8..12][0..4], .big),
+            .signature_inception = std.mem.readInt(u32, rdata[12..16][0..4], .big),
+            .key_tag = std.mem.readInt(u16, rdata[16..18][0..2], .big),
             .signers_name = name_result.name,
             .signature = try allocator.dupe(u8, rdata[name_result.new_offset..]),
         };
@@ -488,7 +488,7 @@ pub const DNSKEYRecord = struct {
     pub fn fromRdata(rdata: []const u8, allocator: std.mem.Allocator) !DNSKEYRecord {
         if (rdata.len < 4) return error.InvalidRdata;
         return DNSKEYRecord{
-            .flags = std.mem.readInt(u16, rdata[0..2], .big),
+            .flags = std.mem.readInt(u16, rdata[0..2][0..2], .big),
             .protocol = rdata[2],
             .algorithm = rdata[3],
             .public_key = try allocator.dupe(u8, rdata[4..]),
@@ -544,7 +544,7 @@ pub const NSEC3Record = struct {
         var offset: usize = 0;
         const hash_algorithm = rdata[offset]; offset += 1;
         const flags = rdata[offset]; offset += 1;
-        const iterations = std.mem.readInt(u16, rdata[offset..offset+2], .big); offset += 2;
+        const iterations = std.mem.readInt(u16, rdata[offset..offset+2][0..2], .big); offset += 2;
         const salt_length = rdata[offset]; offset += 1;
         
         if (offset + salt_length + 1 > rdata.len) return error.InvalidRdata;
@@ -681,14 +681,14 @@ fn encodeDnsName(name: []const u8, allocator: std.mem.Allocator) ![]u8 {
         const label_len = i - label_start;
         if (label_len > 63) return error.InvalidName;
         
-        try result.append(@intCast(label_len));
-        try result.appendSlice(name[label_start..i]);
+        try result.append(allocator, @intCast(label_len));
+        try result.appendSlice(allocator, name[label_start..i]);
         
         if (i < name.len) i += 1; // Skip the dot
     }
     
-    try result.append(0); // Null terminator
-    return result.toOwnedSlice();
+    try result.append(allocator, 0); // Null terminator
+    return result.toOwnedSlice(allocator);
 }
 
 fn decodeDnsName(data: []const u8, offset: usize, allocator: std.mem.Allocator) !struct { name: []u8, new_offset: usize } {
@@ -719,13 +719,13 @@ fn decodeDnsName(data: []const u8, offset: usize, allocator: std.mem.Allocator) 
         pos += 1;
         if (pos + len > data.len) return error.InvalidPacket;
         
-        if (result.items.len > 0) try result.append('.');
-        try result.appendSlice(data[pos..pos + len]);
+        if (result.items.len > 0) try result.append(allocator, '.');
+        try result.appendSlice(allocator, data[pos..pos + len]);
         pos += len;
     }
     
     const final_pos = if (jumped) jump_pos else pos;
-    return .{ .name = try result.toOwnedSlice(), .new_offset = final_pos };
+    return .{ .name = try result.toOwnedSlice(allocator), .new_offset = final_pos };
 }
 
 test "A record encoding" {

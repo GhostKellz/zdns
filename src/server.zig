@@ -64,7 +64,7 @@ pub const Server = struct {
         var server = Server{
             .allocator = allocator,
             .config = config,
-            .zones = std.HashMap([]const u8, zone.Zone, StringHashContext, std.hash_map.default_max_load_percentage){},
+            .zones = std.HashMap([]const u8, zone.Zone, StringHashContext, std.hash_map.default_max_load_percentage).init(allocator),
             .resolver_instance = null,
             .running = false,
             .udp_transport = null,
@@ -167,42 +167,42 @@ pub const Server = struct {
         // Start UDP server
         if (self.config.enable_udp and self.udp_transport != null) {
             const thread = try std.Thread.spawn(.{}, startUdpServer, .{self});
-            try threads.append(thread);
+            try threads.append(self.allocator, thread);
         }
 
         // Start TCP server  
         if (self.config.enable_tcp and self.tcp_transport != null) {
             const thread = try std.Thread.spawn(.{}, startTcpServer, .{self});
-            try threads.append(thread);
+            try threads.append(self.allocator, thread);
         }
 
         // Start TLS server
         if (self.config.enable_tls and self.tls_transport != null) {
             const thread = try std.Thread.spawn(.{}, startTlsServer, .{self});
-            try threads.append(thread);
+            try threads.append(self.allocator, thread);
         }
 
         // Start HTTPS server
         if (self.config.enable_https and self.https_transport != null) {
             const thread = try std.Thread.spawn(.{}, startHttpsServer, .{self});
-            try threads.append(thread);
+            try threads.append(self.allocator, thread);
         }
 
         // Start QUIC server
         if (self.config.enable_quic and self.quic_transport != null) {
             const thread = try std.Thread.spawn(.{}, startQuicServer, .{self});
-            try threads.append(thread);
+            try threads.append(self.allocator, thread);
         }
 
         // Wait for shutdown signal
         while (self.running) {
-            std.time.sleep(1000 * 1000 * 1000); // Sleep 1 second
+            std.Thread.sleep(1000 * 1000 * 1000); // Sleep 1 second
         }
     }
 
     pub fn stop(self: *Server) void {
         self.running = false;
-        std.log.info("Stopping DNS server");
+        std.log.info("Stopping DNS server", .{});
     }
 
     fn startUdpServer(self: *Server) void {
@@ -286,24 +286,24 @@ pub const Server = struct {
             };
 
             // Add answers
-            for (result.answers) |answer| {
-                answers.append(answer) catch continue;
+            for (result.answers.items) |answer| {
+                answers.append(allocator, answer) catch continue;
             }
 
             // Add authorities
-            for (result.authorities) |authority| {
-                authorities.append(authority) catch continue;
+            for (result.authorities.items) |authority| {
+                authorities.append(allocator, authority) catch continue;
             }
 
             // Add additionals
-            for (result.additionals) |additional| {
-                additionals.append(additional) catch continue;
+            for (result.additionals.items) |additional| {
+                additionals.append(allocator, additional) catch continue;
             }
         }
 
-        response.answers = try answers.toOwnedSlice();
-        response.authorities = try authorities.toOwnedSlice();
-        response.additionals = try additionals.toOwnedSlice();
+        response.answers = try answers.toOwnedSlice(allocator);
+        response.authorities = try authorities.toOwnedSlice(allocator);
+        response.additionals = try additionals.toOwnedSlice(allocator);
         
         response.header.ancount = @intCast(response.answers.len);
         response.header.nscount = @intCast(response.authorities.len);
@@ -338,7 +338,7 @@ pub const Server = struct {
                     .ttl = answer.ttl,
                     .rdata = try allocator.dupe(u8, answer.rdata),
                 };
-                try query_response.answers.append(rr);
+                try query_response.answers.append(allocator, rr);
             }
 
             return query_response;

@@ -71,7 +71,7 @@ pub const UdpTransport = struct {
 
         // Receive response
         var response_buffer: [4096]u8 = undefined;
-        const bytes_read = try socket.readAll(&response_buffer);
+        const bytes_read = try socket.read(&response_buffer);
         
         if (bytes_read == 0) return TransportError.InvalidResponse;
 
@@ -99,7 +99,7 @@ pub const UdpTransport = struct {
 
     fn handleUdpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, handler: *const fn(packet.Message, std.mem.Allocator) anyerror!packet.Message) void {
         var buffer: [4096]u8 = undefined;
-        const bytes_read = stream.readAll(&buffer) catch return;
+        const bytes_read = stream.read(&buffer) catch return;
         
         if (bytes_read == 0) return;
 
@@ -161,13 +161,13 @@ pub const TcpTransport = struct {
 
         // Read response length prefix
         var length_buffer: [2]u8 = undefined;
-        _ = try socket.readAll(&length_buffer);
+        _ = try socket.read(&length_buffer);
         const response_length = (@as(u16, length_buffer[0]) << 8) | length_buffer[1];
 
         // Read response data
         const response_buffer = try allocator.alloc(u8, response_length);
         defer allocator.free(response_buffer);
-        _ = try socket.readAll(response_buffer);
+        _ = try socket.read(response_buffer);
 
         // Decode response
         return try packet.Message.decode(allocator, response_buffer);
@@ -196,7 +196,7 @@ pub const TcpTransport = struct {
         while (true) {
             // Read length prefix
             var length_buffer: [2]u8 = undefined;
-            const length_bytes_read = stream.readAll(&length_buffer) catch return;
+            const length_bytes_read = stream.read(&length_buffer) catch return;
             if (length_bytes_read == 0) return; // Connection closed
 
             const message_length = (@as(u16, length_buffer[0]) << 8) | length_buffer[1];
@@ -206,7 +206,7 @@ pub const TcpTransport = struct {
             const message_buffer = allocator.alloc(u8, message_length) catch return;
             defer allocator.free(message_buffer);
             
-            const message_bytes_read = stream.readAll(message_buffer) catch return;
+            const message_bytes_read = stream.read(message_buffer) catch return;
             if (message_bytes_read != message_length) return;
 
             // Decode query

@@ -278,7 +278,7 @@ pub const Cache = struct {
                     .rdata = self.allocator.dupe(u8, cached_record.rdata) catch continue,
                     .parsed = null,
                 };
-                result.authorities.append(record) catch continue;
+                result.authorities.append(self.allocator, record) catch continue;
             }
 
             // Convert cached additionals
@@ -293,7 +293,7 @@ pub const Cache = struct {
                     .rdata = self.allocator.dupe(u8, cached_record.rdata) catch continue,
                     .parsed = null,
                 };
-                result.additionals.append(record) catch continue;
+                result.additionals.append(self.allocator, record) catch continue;
             }
 
             return result;
@@ -313,7 +313,8 @@ pub const Cache = struct {
         
         if (self.entries.fetchRemove(hash_value)) |kv| {
             self.allocator.free(kv.value.key.name);
-            kv.value.value.deinit(self.allocator);
+            var mut_value = kv.value.value;
+            mut_value.deinit(self.allocator);
         }
     }
 
@@ -337,14 +338,15 @@ pub const Cache = struct {
         var iterator = self.entries.iterator();
         while (iterator.next()) |entry| {
             if (entry.value_ptr.isExpired()) {
-                to_remove.append(entry.key_ptr.*) catch continue;
+                to_remove.append(self.allocator, entry.key_ptr.*) catch continue;
             }
         }
 
         for (to_remove.items) |hash_value| {
             if (self.entries.fetchRemove(hash_value)) |kv| {
                 self.allocator.free(kv.value.key.name);
-                kv.value.value.deinit(self.allocator);
+                var mut_value = kv.value.value;
+            mut_value.deinit(self.allocator);
             }
         }
     }
@@ -365,7 +367,8 @@ pub const Cache = struct {
 
         if (self.entries.fetchRemove(oldest_hash)) |kv| {
             self.allocator.free(kv.value.key.name);
-            kv.value.value.deinit(self.allocator);
+            var mut_value = kv.value.value;
+            mut_value.deinit(self.allocator);
         }
     }
 

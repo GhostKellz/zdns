@@ -42,7 +42,7 @@ pub const Zone = struct {
             .allocator = allocator,
             .name = allocator.dupe(u8, name) catch unreachable,
             .soa = null,
-            .records = std.HashMap(ZoneKey, std.ArrayList(ZoneRecord), ZoneKeyContext, std.hash_map.default_max_load_percentage){},
+            .records = std.HashMap(ZoneKey, std.ArrayList(ZoneRecord), ZoneKeyContext, std.hash_map.default_max_load_percentage).init(allocator),
             .origin = allocator.dupe(u8, name) catch unreachable,
             .ttl = 3600, // Default TTL
         };
@@ -58,16 +58,13 @@ pub const Zone = struct {
             for (entry.value_ptr.items) |*record| {
                 record.deinit(self.allocator);
             }
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(self.allocator);
         }
         self.records.deinit();
     }
 
     pub fn fromFile(allocator: std.mem.Allocator, file_path: []const u8) !Zone {
-        const file = try std.fs.cwd().openFile(file_path, .{});
-        defer file.close();
-        
-        const content = try file.readToEndAlloc(allocator, 1024 * 1024); // 1MB max
+        const content = try std.fs.cwd().readFileAlloc(file_path, allocator, @enumFromInt(1024 * 1024)); // 1MB max
         defer allocator.free(content);
         
         return try parseZoneFile(allocator, content);
@@ -96,7 +93,7 @@ pub const Zone = struct {
             self.allocator.free(key.name);
         }
         
-        try result.value_ptr.append(record);
+        try result.value_ptr.append(self.allocator, record);
     }
 
     pub fn removeRecord(self: *Zone, name: []const u8, rtype: records.RecordType, rclass: records.RecordClass) void {
@@ -129,14 +126,14 @@ pub const Zone = struct {
         return null;
     }
 
-    pub fn lookupAny(self: *Zone, name: []const u8) std.ArrayList(ZoneRecord) {
-        var result = std.ArrayList(ZoneRecord){};
+    pub fn lookupAny(self: *Zone, allocator: std.mem.Allocator, name: []const u8) std.ArrayList(ZoneRecord) {
+        var result = std.ArrayList(ZoneRecord).init(allocator);
         
         var iterator = self.records.iterator();
         while (iterator.next()) |entry| {
             if (std.mem.eql(u8, entry.key_ptr.name, name)) {
                 for (entry.value_ptr.items) |record| {
-                    result.append(record) catch continue;
+                    result.append(allocator, record) catch continue;
                 }
             }
         }
@@ -168,13 +165,13 @@ pub const Zone = struct {
         }
     }
 
-    pub fn getAllRecords(self: *Zone) std.ArrayList(ZoneRecord) {
-        var result = std.ArrayList(ZoneRecord){};
+    pub fn getAllRecords(self: *Zone, allocator: std.mem.Allocator) std.ArrayList(ZoneRecord) {
+        var result = std.ArrayList(ZoneRecord).init(allocator);
         
         var iterator = self.records.iterator();
         while (iterator.next()) |entry| {
             for (entry.value_ptr.items) |record| {
-                result.append(record) catch continue;
+                result.append(allocator, record) catch continue;
             }
         }
         
@@ -285,7 +282,7 @@ fn parseZoneFile(allocator: std.mem.Allocator, content: []const u8) !Zone {
     var current_name: []const u8 = "";
     var current_ttl: u32 = 3600;
     
-    var lines = std.mem.split(u8, content, "\n");
+    var lines = std.mem.splitSequence(u8, content, "\n");
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         
@@ -294,7 +291,7 @@ fn parseZoneFile(allocator: std.mem.Allocator, content: []const u8) !Zone {
         
         // Handle $ORIGIN directive
         if (std.mem.startsWith(u8, trimmed, "$ORIGIN")) {
-            var parts = std.mem.split(u8, trimmed, " ");
+            var parts = std.mem.splitSequence(u8, trimmed, " ");
             _ = parts.next(); // Skip $ORIGIN
             if (parts.next()) |origin| {
                 zone.allocator.free(zone.origin);
@@ -305,7 +302,7 @@ fn parseZoneFile(allocator: std.mem.Allocator, content: []const u8) !Zone {
         
         // Handle $TTL directive
         if (std.mem.startsWith(u8, trimmed, "$TTL")) {
-            var parts = std.mem.split(u8, trimmed, " ");
+            var parts = std.mem.splitSequence(u8, trimmed, " ");
             _ = parts.next(); // Skip $TTL
             if (parts.next()) |ttl_str| {
                 current_ttl = std.fmt.parseInt(u32, std.mem.trim(u8, ttl_str, " \t"), 10) catch current_ttl;
@@ -352,7 +349,7 @@ const ParsedRecord = struct {
 };
 
 fn parseResourceRecord(allocator: std.mem.Allocator, line: []const u8, current_name: []const u8, default_ttl: u32) !ParsedRecord {
-    var parts = std.mem.split(u8, line, " ");
+    var parts = std.mem.splitSequence(u8, line, " ");
     
     // Parse name (or use current name if line starts with whitespace)
     var name: []const u8 = undefined;
@@ -370,7 +367,7 @@ fn parseResourceRecord(allocator: std.mem.Allocator, line: []const u8, current_n
     const next_part = std.mem.trim(u8, parts.next().?, " \t");
     
     // Check if it's a number (TTL) or record type
-    if (std.fmt.parseInt(u32, next_part, 10)) |parsed_ttl| {
+    if (std.fmt.parseInt(u32, next_part, 10) catch null) |parsed_ttl| {
         ttl = parsed_ttl;
         
         // Next should be class or type
@@ -395,9 +392,9 @@ fn parseResourceRecord(allocator: std.mem.Allocator, line: []const u8, current_n
         const trimmed_part = std.mem.trim(u8, part, " \t");
         if (trimmed_part.len > 0) {
             if (rdata_parts.items.len > 0) {
-                try rdata_parts.append(' ');
+                try rdata_parts.append(allocator, ' ');
             }
-            try rdata_parts.appendSlice(trimmed_part);
+            try rdata_parts.appendSlice(allocator, trimmed_part);
         }
     }
     
@@ -414,7 +411,7 @@ fn parseResourceRecord(allocator: std.mem.Allocator, line: []const u8, current_n
 }
 
 fn parseRecordType(type_str: []const u8) ?records.RecordType {
-    inline for (@typeInfo(records.RecordType).Enum.fields) |field| {
+    inline for (@typeInfo(records.RecordType).@"enum".fields) |field| {
         if (std.mem.eql(u8, type_str, field.name)) {
             return @enumFromInt(field.value);
         }
@@ -433,7 +430,7 @@ fn parseRecordData(allocator: std.mem.Allocator, rtype: records.RecordType, data
     switch (rtype) {
         .A => {
             // Parse IPv4 address
-            var parts = std.mem.split(u8, data, ".");
+            var parts = std.mem.splitSequence(u8, data, ".");
             var bytes: [4]u8 = undefined;
             var i: usize = 0;
             while (parts.next()) |part| {
@@ -457,7 +454,7 @@ fn parseRecordData(allocator: std.mem.Allocator, rtype: records.RecordType, data
         },
         .MX => {
             // Priority + domain name
-            var parts = std.mem.split(u8, data, " ");
+            var parts = std.mem.splitSequence(u8, data, " ");
             const priority_str = parts.next() orelse return error.ParseError;
             const exchange = parts.next() orelse return error.ParseError;
             
@@ -503,14 +500,14 @@ fn encodeDnsName(name: []const u8, allocator: std.mem.Allocator) ![]u8 {
         const label_len = i - label_start;
         if (label_len > 63) return error.InvalidName;
         
-        try result.append(@intCast(label_len));
-        try result.appendSlice(name[label_start..i]);
+        try result.append(allocator, @intCast(label_len));
+        try result.appendSlice(allocator, name[label_start..i]);
         
         if (i < name.len) i += 1; // Skip the dot
     }
     
-    try result.append(0); // Null terminator
-    return result.toOwnedSlice();
+    try result.append(allocator, 0); // Null terminator
+    return result.toOwnedSlice(allocator);
 }
 
 // Zone storage backends

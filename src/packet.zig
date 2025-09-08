@@ -69,12 +69,12 @@ pub const Header = packed struct {
         if (bytes.len < 12) return DnsError.PacketTooSmall;
         
         return Header{
-            .id = std.mem.readInt(u16, bytes[0..2], .big),
-            .flags = @bitCast(std.mem.readInt(u16, bytes[2..4], .big)),
-            .qdcount = std.mem.readInt(u16, bytes[4..6], .big),
-            .ancount = std.mem.readInt(u16, bytes[6..8], .big),
-            .nscount = std.mem.readInt(u16, bytes[8..10], .big),
-            .arcount = std.mem.readInt(u16, bytes[10..12], .big),
+            .id = std.mem.readInt(u16, bytes[0..2][0..2], .big),
+            .flags = @bitCast(std.mem.readInt(u16, bytes[2..4][0..2], .big)),
+            .qdcount = std.mem.readInt(u16, bytes[4..6][0..2], .big),
+            .ancount = std.mem.readInt(u16, bytes[6..8][0..2], .big),
+            .nscount = std.mem.readInt(u16, bytes[8..10][0..2], .big),
+            .arcount = std.mem.readInt(u16, bytes[10..12][0..2], .big),
         };
     }
 };
@@ -98,13 +98,16 @@ pub const Question = struct {
         return encoded_name.len + 4; // name + type (2) + class (2)
     }
 
-    pub fn encode(self: Question, allocator: std.mem.Allocator, writer: anytype) !void {
+    pub fn encode(self: Question, allocator: std.mem.Allocator) ![]u8 {
         const encoded_name = try encodeName(self.name, allocator);
         defer allocator.free(encoded_name);
         
-        try writer.writeAll(encoded_name);
-        try writer.writeInt(u16, @intFromEnum(self.qtype), .big);
-        try writer.writeInt(u16, @intFromEnum(self.qclass), .big);
+        const result = try allocator.alloc(u8, encoded_name.len + 4);
+        @memcpy(result[0..encoded_name.len], encoded_name);
+        std.mem.writeInt(u16, result[encoded_name.len..encoded_name.len + 2][0..2], @intFromEnum(self.qtype), .big);
+        std.mem.writeInt(u16, result[encoded_name.len + 2..encoded_name.len + 4][0..2], @intFromEnum(self.qclass), .big);
+        
+        return result;
     }
 };
 
@@ -131,16 +134,25 @@ pub const ResourceRecord = struct {
         return encoded_name.len + 10 + self.rdata.len; // name + type(2) + class(2) + ttl(4) + rdlength(2) + rdata
     }
 
-    pub fn encode(self: ResourceRecord, allocator: std.mem.Allocator, writer: anytype) !void {
+    pub fn encode(self: ResourceRecord, allocator: std.mem.Allocator) ![]u8 {
         const encoded_name = try encodeName(self.name, allocator);
         defer allocator.free(encoded_name);
         
-        try writer.writeAll(encoded_name);
-        try writer.writeInt(u16, @intFromEnum(self.rtype), .big);
-        try writer.writeInt(u16, @intFromEnum(self.rclass), .big);
-        try writer.writeInt(u32, self.ttl, .big);
-        try writer.writeInt(u16, @intCast(self.rdata.len), .big);
-        try writer.writeAll(self.rdata);
+        const result = try allocator.alloc(u8, encoded_name.len + 10 + self.rdata.len);
+        @memcpy(result[0..encoded_name.len], encoded_name);
+        var offset = encoded_name.len;
+        
+        std.mem.writeInt(u16, result[offset..offset + 2][0..2], @intFromEnum(self.rtype), .big);
+        offset += 2;
+        std.mem.writeInt(u16, result[offset..offset + 2][0..2], @intFromEnum(self.rclass), .big);
+        offset += 2;
+        std.mem.writeInt(u32, result[offset..offset + 4][0..4], self.ttl, .big);
+        offset += 4;
+        std.mem.writeInt(u16, result[offset..offset + 2][0..2], @intCast(self.rdata.len), .big);
+        offset += 2;
+        @memcpy(result[offset..offset + self.rdata.len], self.rdata);
+        
+        return result;
     }
 };
 
@@ -187,25 +199,37 @@ pub const Message = struct {
         }
 
         const result = try allocator.alloc(u8, size);
-        var stream = std.io.fixedBufferStream(result);
-        var writer = stream.writer();
+        var buffer_index: usize = 0;
 
         // Encode header
         const header_bytes = self.header.toBytes();
-        try writer.writeAll(&header_bytes);
+        @memcpy(result[buffer_index..buffer_index + header_bytes.len], &header_bytes);
+        buffer_index += header_bytes.len;
 
         // Encode sections
         for (self.questions) |q| {
-            try q.encode(allocator, writer);
+            const encoded = try q.encode(allocator);
+            @memcpy(result[buffer_index..buffer_index + encoded.len], encoded);
+            buffer_index += encoded.len;
+            allocator.free(encoded);
         }
         for (self.answers) |rr| {
-            try rr.encode(allocator, writer);
+            const encoded = try rr.encode(allocator);
+            @memcpy(result[buffer_index..buffer_index + encoded.len], encoded);
+            buffer_index += encoded.len;
+            allocator.free(encoded);
         }
         for (self.authorities) |rr| {
-            try rr.encode(allocator, writer);
+            const encoded = try rr.encode(allocator);
+            @memcpy(result[buffer_index..buffer_index + encoded.len], encoded);
+            buffer_index += encoded.len;
+            allocator.free(encoded);
         }
         for (self.additionals) |rr| {
-            try rr.encode(allocator, writer);
+            const encoded = try rr.encode(allocator);
+            @memcpy(result[buffer_index..buffer_index + encoded.len], encoded);
+            buffer_index += encoded.len;
+            allocator.free(encoded);
         }
 
         return result;
@@ -278,14 +302,14 @@ fn encodeName(name: []const u8, allocator: std.mem.Allocator) ![]u8 {
         const label_len = i - label_start;
         if (label_len > 63) return DnsError.InvalidName;
         
-        try result.append(@intCast(label_len));
-        try result.appendSlice(name[label_start..i]);
+        try result.append(allocator, @intCast(label_len));
+        try result.appendSlice(allocator, name[label_start..i]);
         
         if (i < name.len) i += 1; // Skip the dot
     }
     
-    try result.append(0); // Null terminator
-    return result.toOwnedSlice();
+    try result.append(allocator, 0); // Null terminator
+    return try result.toOwnedSlice(allocator);
 }
 
 fn decodeName(data: []const u8, offset: usize, allocator: std.mem.Allocator) !struct { name: []u8, new_offset: usize } {
@@ -316,13 +340,13 @@ fn decodeName(data: []const u8, offset: usize, allocator: std.mem.Allocator) !st
         pos += 1;
         if (pos + len > data.len) return DnsError.InvalidPacket;
         
-        if (result.items.len > 0) try result.append('.');
-        try result.appendSlice(data[pos..pos + len]);
+        if (result.items.len > 0) try result.append(allocator, '.');
+        try result.appendSlice(allocator, data[pos..pos + len]);
         pos += len;
     }
     
     const final_pos = if (jumped) jump_pos else pos;
-    return .{ .name = try result.toOwnedSlice(), .new_offset = final_pos };
+    return .{ .name = try result.toOwnedSlice(allocator), .new_offset = final_pos };
 }
 
 fn decodeQuestion(data: []const u8, offset: usize) !struct { question: Question, new_offset: usize } {
@@ -335,8 +359,8 @@ fn decodeQuestion(data: []const u8, offset: usize) !struct { question: Question,
     
     if (pos + 4 > data.len) return DnsError.PacketTooSmall;
     
-    const qtype: records.RecordType = @enumFromInt(std.mem.readInt(u16, data[pos..pos+2], .big));
-    const qclass: records.RecordClass = @enumFromInt(std.mem.readInt(u16, data[pos+2..pos+4], .big));
+    const qtype: records.RecordType = @enumFromInt(std.mem.readInt(u16, data[pos..pos+2][0..2], .big));
+    const qclass: records.RecordClass = @enumFromInt(std.mem.readInt(u16, data[pos+2..pos+4][0..2], .big));
     pos += 4;
     
     return .{
@@ -355,10 +379,10 @@ fn decodeResourceRecord(allocator: std.mem.Allocator, data: []const u8, offset: 
     
     if (pos + 10 > data.len) return DnsError.PacketTooSmall;
     
-    const rtype: records.RecordType = @enumFromInt(std.mem.readInt(u16, data[pos..pos+2], .big));
-    const rclass: records.RecordClass = @enumFromInt(std.mem.readInt(u16, data[pos+2..pos+4], .big));
-    const ttl = std.mem.readInt(u32, data[pos+4..pos+8], .big);
-    const rdlength = std.mem.readInt(u16, data[pos+8..pos+10], .big);
+    const rtype: records.RecordType = @enumFromInt(std.mem.readInt(u16, data[pos..pos+2][0..2], .big));
+    const rclass: records.RecordClass = @enumFromInt(std.mem.readInt(u16, data[pos+2..pos+4][0..2], .big));
+    const ttl = std.mem.readInt(u32, data[pos+4..pos+8][0..4], .big);
+    const rdlength = std.mem.readInt(u16, data[pos+8..pos+10][0..2], .big);
     pos += 10;
     
     if (pos + rdlength > data.len) return DnsError.PacketTooSmall;
